@@ -15,3 +15,8 @@ passwords.txt
 
 # Private TLS keys
 *.key
+
+# Update zip and checksum
+updates/
+*.zip
+*.sha256

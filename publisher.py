@@ -6,6 +6,8 @@ import time
 import ssl
 import os
 from dotenv import load_dotenv
+from update import check_for_update
+import sys
 
 load_dotenv()
 
@@ -42,5 +44,12 @@ while True:
     client.publish(TOPIC, payload)
 
     print(f"Published payload: {payload}")
+
+    # check for update
+    update = check_for_update()
+    if update:
+        print("Update available. Exiting application.")
+        sys.exit(0)
+
 
     time.sleep(5)

@@ -13,6 +13,10 @@ The project demonstrates:
 - Automatic database storage timestamp
 - Separate, restricted MySQL application user
 - Secrets stored in environment variables
+- Automatic application update from GitHub Releases
+- SHA-256 verification of downloaded update packages
+- Separate updater process for safe application replacement
+- Automatic application restart after an update
 
 ## Architecture
 
@@ -45,10 +49,44 @@ The project demonstrates:
 └──────────────┘
 ```
 
+### Automatic update architecture
+
+```text
+┌──────────────┐
+│  publisher   │
+└──────┬───────┘
+       │
+       │ check GitHub Releases
+       ▼
+┌──────────────┐
+│  update.py   │
+└──────┬───────┘
+       │
+       ├── download ZIP
+       ├── download SHA-256
+       ├── verify checksum
+       └── extract update
+              │
+              ▼
+       ┌──────────────┐
+       │ updater.py   │
+       └──────┬───────┘
+              │
+              │ wait for publisher
+              ▼
+       install update
+              │
+              ▼
+       restart publisher
+```
+
+The updater runs as a separate process. This allows the currently running publisher process to terminate before its files are replaced.
+
 ## Project structure
 
 ```text
 mqtt_project/
+
 │
 ├── certs/
 │   ├── ca.crt
@@ -59,18 +97,30 @@ mqtt_project/
 ├── .env
 ├── .gitignore
 ├── README.md
+├── create_release.py
 ├── database_setup.sql
 ├── database.py
 ├── mosquitto.conf
 ├── passwords.txt
 ├── publisher.py
 ├── subscriber.py
+├── update.py
+├── updater.py
+├── version.py
 ├── pyproject.toml
-├── requirements.txt
 └── uv.lock
 ```
 
-Private keys (`*.key`), `.env`, and `passwords.txt` are intentionally excluded from Git.
+Private keys (`*.key`), `.env`, `passwords.txt`, generated release ZIP files, and SHA-256 checksum files are intentionally excluded from Git.
+
+The following directories are also generated locally during the update process:
+
+```text
+updates/
+update_temp/
+```
+
+These directories are not committed to Git.
 
 ## Requirements
 
@@ -125,11 +175,14 @@ The `sensor_data` table stores:
 
 The application uses the restricted MySQL user `mqtt_app` rather than `root`.
 
-
 ### MySQL restricted user setup
-The project uses a dedicated MySQL application user instead of the root user.  
-Open database_setup.sql in MySQL Workbench and execute it to create the database and sensor_data table.  
+
+The project uses a dedicated MySQL application user instead of the root user.
+
+Open `database_setup.sql` in MySQL Workbench and execute it to create the database and `sensor_data` table.
+
 The setup should also create a dedicated user for the application:
+
 ```sql
 CREATE USER 'mqtt_app'@'localhost' IDENTIFIED BY 'CHOOSE_YOUR_PASSWORD';
 
@@ -138,19 +191,22 @@ TO 'mqtt_app'@'localhost';
 
 FLUSH PRIVILEGES;
 ```
-Replace CHOOSE_YOUR_PASSWORD with a password of your choice.
 
-Then create a .env file in the project root and use the same credentials:
+Replace `CHOOSE_YOUR_PASSWORD` with a password of your choice.
+
+Then create a `.env` file in the project root and use the same credentials:
+
 ```env
 SQL_USER="mqtt_app"
 SQL_PASSWORD="CHOOSE_YOUR_PASSWORD"
 ```
 
-The password must not be committed to Git. The .env file is already excluded by .gitignore.
+The password must not be committed to Git. The `.env` file is already excluded by `.gitignore`.
 
-The application therefore does not require or use the MySQL root account. Each user setting up the project can create their own mqtt_app password.
+The application therefore does not require or use the MySQL root account. Each user setting up the project can create their own `mqtt_app` password.
 
-The application only needs permission to insert sensor measurements.  
+The application only needs permission to insert sensor measurements.
+
 This follows the principle of least privilege: the application does not receive full administrative access to the MySQL server.
 
 ## MQTT authentication
@@ -263,6 +319,111 @@ Published payload: {"device_id": "senzor_01", "timestamp": "2026-08-29T13:00:58"
 
 The subscriber receives the message and stores it in MySQL.
 
+## Automatic updates
+
+The application can automatically update itself using GitHub Releases.
+
+The local application version is defined in:
+
+```text
+version.py
+```
+
+The update process compares the local version with the latest GitHub Release.
+
+If a newer version is available, the application:
+
+1. Downloads the release ZIP file.
+2. Downloads the corresponding SHA-256 checksum file.
+3. Calculates the SHA-256 checksum of the downloaded ZIP.
+4. Compares the calculated checksum with the expected checksum.
+5. Extracts the update into a temporary directory.
+6. Starts `updater.py` as a separate process.
+7. The current publisher process terminates.
+8. The updater waits for the publisher process to finish.
+9. The updater copies the new application files into the project directory.
+10. The updater starts the updated publisher again.
+
+If the SHA-256 verification fails, the update is not installed.
+
+### Update directories
+
+Downloaded update files are stored temporarily in:
+
+```text
+updates/
+```
+
+The extracted update is stored temporarily in:
+
+```text
+update_temp/
+```
+
+Both directories are cleaned before a new update is downloaded or extracted.
+
+The update directories are local working directories and are not committed to Git.
+
+## Creating a new release
+
+Release packages are generated using:
+
+```text
+create_release.py
+```
+
+The script creates both the ZIP package and its SHA-256 checksum file.
+
+First update the application version in `version.py`.
+
+For example:
+
+```python
+VERSION = "1.2.0"
+```
+
+Then run:
+
+```powershell
+uv run create_release.py
+```
+
+The script generates:
+
+```text
+mqtt_client_v1.2.0.zip
+mqtt_client_v1.2.0.zip.sha256
+```
+
+The ZIP contains the files explicitly selected by `create_release.py`.
+
+The update mechanism itself (`updater.py`) is not included in the release ZIP.
+
+The SHA-256 file contains the checksum of the ZIP package:
+
+```text
+<sha256>  mqtt_client_v1.2.0.zip
+```
+
+### Publishing the release on GitHub
+
+After generating the release files:
+
+1. Commit and push the application changes.
+2. Create a Git tag matching the application version, for example:
+   ```text
+   v1.2.0
+   ```
+3. Create a new GitHub Release using the tag.
+4. Upload:
+   ```text
+   mqtt_client_v1.2.0.zip
+   mqtt_client_v1.2.0.zip.sha256
+   ```
+5. Publish the release.
+
+The updater uses the latest GitHub Release and downloads the ZIP and checksum files from its release assets.
+
 ## Checking the stored data
 
 In MySQL Workbench:
@@ -307,6 +468,7 @@ The project implements several security measures:
 - The application database user is granted only the required permissions.
 - Private TLS keys are excluded from Git.
 - The Mosquitto password file is excluded from Git.
+- Downloaded update packages are verified using SHA-256 before installation.
 
 ## Stopping the application
 
@@ -324,4 +486,6 @@ Ctrl+C
 
 ## Notes
 
-This project is intended as a local demonstration of an MQTT sensor data pipeline with basic security mechanisms. The certificates are self-signed for local development and are not intended for production deployment.
+This project is intended as a local demonstration of an MQTT sensor data pipeline with basic security mechanisms and an automatic application update mechanism.
+
+The certificates are self-signed for local development and are not intended for production deployment.
