@@ -5,6 +5,7 @@ from database import save_sensor_data
 import ssl
 import os
 from dotenv import load_dotenv
+from version import VERSION
 
 load_dotenv()
 
@@ -13,7 +14,7 @@ MQTT_PASSWORD = os.getenv("MQTT_PASSWORD")
 
 
 BROKER = "localhost"
-PORT = 8883 #1883
+PORT = 8885
 TOPIC = "sensor/environment"
 
 def on_connect(client, userdata, flags, reason_code, properties):
@@ -49,6 +50,10 @@ def on_message(client, userdata, msg):
 
     except (json.JSONDecodeError, KeyError) as error:
         print(f"Invalid message: {error}")
+
+
+
+print(f"MQTT client version: {VERSION}")
 
 client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
 client.tls_set(

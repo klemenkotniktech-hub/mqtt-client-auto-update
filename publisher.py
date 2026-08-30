@@ -13,7 +13,7 @@ MQTT_USERNAME = os.getenv("MQTT_USERNAME")
 MQTT_PASSWORD = os.getenv("MQTT_PASSWORD")
 
 BROKER = "localhost"
-PORT = 8883 #1883
+PORT = 8885
 TOPIC = "sensor/environment"
 
 DEVICE_ID = "senzor_01"
