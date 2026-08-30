@@ -24,7 +24,7 @@ The project demonstrates:
 └──────┬───────┘
        │
        │ MQTT over TLS
-       │ port 8883
+       │ port 8885
        ▼
 ┌──────────────┐
 │  Mosquitto   │
@@ -169,7 +169,7 @@ The Mosquitto configuration uses password authentication and does not allow anon
 
 ## TLS
 
-The MQTT broker listens on port `8883` and uses TLS.
+The MQTT broker listens on port `8885` and uses TLS.
 
 The subscriber verifies the broker certificate using:
 
@@ -214,7 +214,7 @@ From the project root:
 mosquitto -c mosquitto.conf -v
 ```
 
-The broker should report that it is running on port `8883`.
+The broker should report that it is running on port `8885`.
 
 Keep this terminal open.
 
