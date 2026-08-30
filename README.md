@@ -4,23 +4,24 @@ A small MQTT-based sensor data pipeline implemented in Python.
 
 The project demonstrates:
 
-- MQTT publisher and subscriber communication
-- MQTT over TLS
-- MQTT username/password authentication
-- Sensor data in JSON format
-- Measurement and reception timestamps
-- Storage of sensor data in MySQL
-- Automatic database storage timestamp
-- Separate, restricted MySQL application user
-- Secrets stored in environment variables
-- Automatic application update from GitHub Releases
-- SHA-256 verification of downloaded update packages
-- Separate updater process for safe application replacement
-- Automatic application restart after an update
+-   MQTT publisher and subscriber communication
+-   MQTT over TLS
+-   MQTT username/password authentication
+-   Sensor data in JSON format
+-   Measurement and reception timestamps
+-   Storage of sensor data in MySQL
+-   Automatic database storage timestamp
+-   Separate, restricted MySQL application user
+-   Secrets stored in environment variables
+-   Automatic application update from GitHub Releases
+-   SHA-256 verification of update packages
+-   Separate updater process
+-   Automatic publisher restart after an update
+-   Optional email notifications before and after an update
 
 ## Architecture
 
-```text
+``` text
 ┌──────────────┐
 │  publisher   │
 │              │
@@ -47,44 +48,27 @@ The project demonstrates:
 │    MySQL     │
 │ mqtt_project │
 └──────────────┘
+
+        GitHub Releases
+              │
+              │ ZIP + SHA-256
+              ▼
+┌──────────────────────┐
+│   Update mechanism   │
+│                      │
+│ publisher → update   │
+│      ↓               │
+│   updater.py         │
+│      ↓               │
+│ install new version  │
+│      ↓               │
+│ restart publisher    │
+└──────────────────────┘
 ```
-
-### Automatic update architecture
-
-```text
-┌──────────────┐
-│  publisher   │
-└──────┬───────┘
-       │
-       │ check GitHub Releases
-       ▼
-┌──────────────┐
-│  update.py   │
-└──────┬───────┘
-       │
-       ├── download ZIP
-       ├── download SHA-256
-       ├── verify checksum
-       └── extract update
-              │
-              ▼
-       ┌──────────────┐
-       │ updater.py   │
-       └──────┬───────┘
-              │
-              │ wait for publisher
-              ▼
-       install update
-              │
-              ▼
-       restart publisher
-```
-
-The updater runs as a separate process. This allows the currently running publisher process to terminate before its files are replaced.
 
 ## Project structure
 
-```text
+``` text
 mqtt_project/
 
 │
@@ -93,6 +77,12 @@ mqtt_project/
 │   ├── server.crt
 │   ├── server.csr
 │   └── server_ext.cnf
+│
+├── updates/
+│   └── downloaded update packages
+│
+├── update_temp/
+│   └── extracted update package
 │
 ├── .env
 ├── .gitignore
@@ -111,46 +101,71 @@ mqtt_project/
 └── uv.lock
 ```
 
-Private keys (`*.key`), `.env`, `passwords.txt`, generated release ZIP files, and SHA-256 checksum files are intentionally excluded from Git.
-
-The following directories are also generated locally during the update process:
-
-```text
-updates/
-update_temp/
-```
-
-These directories are not committed to Git.
+Private keys (`*.key`), `.env`, `passwords.txt`, update packages, and
+temporary update files are intentionally excluded from Git.
 
 ## Requirements
 
-- Python 3
-- `uv`
-- Mosquitto 2.x
-- MySQL Server
-- OpenSSL
+-   Python 3
+-   `uv`
+-   Mosquitto 2.x
+-   MySQL Server
+-   OpenSSL
+-   A GitHub repository containing Releases
 
 ## Configuration
 
 Create a `.env` file in the project root:
 
-```env
+``` env
 MQTT_USERNAME="mqtt_user"
 MQTT_PASSWORD="your_mqtt_password"
 
 SQL_USER="mqtt_app"
 SQL_PASSWORD="your_sql_password"
+
+EMAIL_SENDER="your@gmail.com"
+EMAIL_PASSWORD="your_app_password"
+EMAIL_RECIPIENT="recipient@example.com"
+
+SMTP_SERVER="smtp.gmail.com"
+SMTP_PORT="587"
 ```
 
 The `.env` file must not be committed to Git.
+
+### Email configuration
+
+Email notifications are used to demonstrate the automatic update
+process.
+
+The client can send:
+
+1.  an email immediately before the update starts,
+2.  an email when the newly installed publisher starts for the first
+    time after the update.
+
+For Gmail, use a Google App Password instead of the normal Google
+account password.
+
+The email settings are optional for the MQTT functionality, but they are
+used by the update demonstration.
+
+The `update_completed` marker is created by `updater.py` after a
+successful installation. The newly started publisher detects the marker,
+sends the completion email, and then removes the marker. This prevents
+the completion email from being sent on every normal application start.
 
 ## Python dependencies
 
 Install the project dependencies with:
 
-```powershell
+``` powershell
 uv sync
 ```
+
+The project can be run directly with `uv run`, without manually
+activating the virtual environment.
 
 ## MySQL setup
 
@@ -158,32 +173,35 @@ Start MySQL and execute `database_setup.sql` in MySQL Workbench.
 
 The database should contain:
 
-```text
+``` text
 mqtt_project
 └── sensor_data
 ```
 
 The `sensor_data` table stores:
 
-- `device_id`
-- `measurement_timestamp` - time generated by the publisher
-- `received_timestamp` - time recorded by the subscriber
-- `stored_timestamp` - time automatically generated by MySQL
-- `temperature`
-- `humidity`
-- `pressure`
+-   `device_id`
+-   `measurement_timestamp` - time generated by the publisher
+-   `received_timestamp` - time recorded by the subscriber
+-   `stored_timestamp` - time automatically generated by MySQL
+-   `temperature`
+-   `humidity`
+-   `pressure`
 
-The application uses the restricted MySQL user `mqtt_app` rather than `root`.
+The application uses the restricted MySQL user `mqtt_app` rather than
+`root`.
 
 ### MySQL restricted user setup
 
-The project uses a dedicated MySQL application user instead of the root user.
+The project uses a dedicated MySQL application user instead of the root
+user.
 
-Open `database_setup.sql` in MySQL Workbench and execute it to create the database and `sensor_data` table.
+Open `database_setup.sql` in MySQL Workbench and execute it to create
+the database and `sensor_data` table.
 
 The setup should also create a dedicated user for the application:
 
-```sql
+``` sql
 CREATE USER 'mqtt_app'@'localhost' IDENTIFIED BY 'CHOOSE_YOUR_PASSWORD';
 
 GRANT INSERT ON mqtt_project.sensor_data
@@ -194,26 +212,33 @@ FLUSH PRIVILEGES;
 
 Replace `CHOOSE_YOUR_PASSWORD` with a password of your choice.
 
-Then create a `.env` file in the project root and use the same credentials:
+Then create a `.env` file in the project root and use the same
+credentials:
 
-```env
+``` env
 SQL_USER="mqtt_app"
 SQL_PASSWORD="CHOOSE_YOUR_PASSWORD"
 ```
 
-The password must not be committed to Git. The `.env` file is already excluded by `.gitignore`.
+The password must not be committed to Git. The `.env` file is already
+excluded by `.gitignore`.
 
-The application therefore does not require or use the MySQL root account. Each user setting up the project can create their own `mqtt_app` password.
+The application therefore does not require or use the MySQL root
+account.
+
+Each user setting up the project can create their own `mqtt_app`
+password.
 
 The application only needs permission to insert sensor measurements.
 
-This follows the principle of least privilege: the application does not receive full administrative access to the MySQL server.
+This follows the principle of least privilege: the application does not
+receive full administrative access to the MySQL server.
 
 ## MQTT authentication
 
 Create the Mosquitto password file:
 
-```powershell
+``` powershell
 mosquitto_passwd -c passwords.txt mqtt_user
 ```
 
@@ -221,7 +246,8 @@ Enter the password when prompted.
 
 The password file is excluded from Git.
 
-The Mosquitto configuration uses password authentication and does not allow anonymous access.
+The Mosquitto configuration uses password authentication and does not
+allow anonymous access.
 
 ## TLS
 
@@ -229,24 +255,25 @@ The MQTT broker listens on port `8885` and uses TLS.
 
 The subscriber verifies the broker certificate using:
 
-```text
+``` text
 certs/ca.crt
 ```
 
 The broker uses:
 
-```text
+``` text
 certs/server.crt
 certs/server.key
 ```
 
 Private keys are excluded from Git using:
 
-```gitignore
+``` gitignore
 *.key
 ```
 
-The certificate configuration is intended for local development, with `localhost` / `127.0.0.1` as the broker address.
+The certificate configuration is intended for local development, with
+`localhost` / `127.0.0.1` as the broker address.
 
 ## Running the project
 
@@ -256,7 +283,7 @@ Open a terminal in the project directory.
 
 With PowerShell:
 
-```powershell
+``` powershell
 .\.venv\Scripts\Activate.ps1
 ```
 
@@ -266,7 +293,7 @@ Or use `uv run` directly without activating the environment.
 
 From the project root:
 
-```powershell
+``` powershell
 mosquitto -c mosquitto.conf -v
 ```
 
@@ -278,19 +305,19 @@ Keep this terminal open.
 
 Open a second terminal in the project directory:
 
-```powershell
+``` powershell
 uv run subscriber.py
 ```
 
 The subscriber should connect successfully and subscribe to:
 
-```text
+``` text
 sensor/environment
 ```
 
 Expected output:
 
-```text
+``` text
 Connected to MQTT with result code Success
 Subscribed to topic: sensor/environment
 ```
@@ -301,19 +328,20 @@ Keep the subscriber running.
 
 Open a third terminal:
 
-```powershell
+``` powershell
 uv run publisher.py
 ```
 
-The publisher generates sensor values every 5 seconds and publishes them to:
+The publisher generates sensor values every 5 seconds and publishes them
+to:
 
-```text
+``` text
 sensor/environment
 ```
 
 Example:
 
-```text
+``` text
 Published payload: {"device_id": "senzor_01", "timestamp": "2026-08-29T13:00:58", "temperature": 23.95, "humidity": 55.32, "pressure": 1021.22}
 ```
 
@@ -321,114 +349,140 @@ The subscriber receives the message and stores it in MySQL.
 
 ## Automatic updates
 
-The application can automatically update itself using GitHub Releases.
+The publisher periodically checks the latest GitHub Release.
 
-The local application version is defined in:
+The current application version is stored in `version.py`:
 
-```text
-version.py
+``` python
+VERSION = "1.0.0"
 ```
 
-The update process compares the local version with the latest GitHub Release.
+If a newer GitHub Release is detected, the publisher:
 
-If a newer version is available, the application:
+1.  Downloads the `.zip` update package.
+2.  Downloads the corresponding `.sha256` checksum file.
+3.  Calculates the SHA-256 checksum of the downloaded ZIP.
+4.  Compares it with the expected checksum.
+5.  Extracts the verified package into `update_temp`.
+6.  Starts `updater.py` as a separate process.
+7.  Exits the currently running publisher.
+8.  The updater copies the new files to the application directory.
+9.  The updater creates the `update_completed` marker.
+10. The updater starts the new publisher.
+11. The new publisher detects the marker and sends the update-completed
+    email.
+12. The marker is removed.
 
-1. Downloads the release ZIP file.
-2. Downloads the corresponding SHA-256 checksum file.
-3. Calculates the SHA-256 checksum of the downloaded ZIP.
-4. Compares the calculated checksum with the expected checksum.
-5. Extracts the update into a temporary directory.
-6. Starts `updater.py` as a separate process.
-7. The current publisher process terminates.
-8. The updater waits for the publisher process to finish.
-9. The updater copies the new application files into the project directory.
-10. The updater starts the updated publisher again.
+The update package is installed only when the SHA-256 checksum
+verification succeeds.
 
-If the SHA-256 verification fails, the update is not installed.
+### Update flow
 
-### Update directories
-
-Downloaded update files are stored temporarily in:
-
-```text
-updates/
+``` text
+Publisher
+    │
+    ▼
+Check GitHub Release
+    │
+    ▼
+New version available?
+    │
+    ▼
+Send "update started" email
+    │
+    ▼
+Download ZIP + SHA-256
+    │
+    ▼
+Verify SHA-256
+    │
+    ├── FAIL → Update cancelled
+    │
+    ▼
+Extract update
+    │
+    ▼
+Start updater.py
+    │
+    ▼
+Publisher exits
+    │
+    ▼
+Updater installs new version
+    │
+    ▼
+Create update_completed marker
+    │
+    ▼
+Start new publisher
+    │
+    ▼
+Publisher detects marker
+    │
+    ▼
+Send "update completed" email
+    │
+    ▼
+Remove marker
+    │
+    ▼
+Normal operation
 ```
-
-The extracted update is stored temporarily in:
-
-```text
-update_temp/
-```
-
-Both directories are cleaned before a new update is downloaded or extracted.
-
-The update directories are local working directories and are not committed to Git.
 
 ## Creating a new release
 
-Release packages are generated using:
+The project contains `create_release.py` to prepare an update package.
 
-```text
-create_release.py
+The script creates:
+
+``` text
+mqtt_client_vX.Y.Z.zip
+mqtt_client_vX.Y.Z.zip.sha256
 ```
 
-The script creates both the ZIP package and its SHA-256 checksum file.
+The SHA-256 file contains the checksum of the generated ZIP package.
 
-First update the application version in `version.py`.
+The update package should contain only the files that are intended to be
+installed on the client.
+
+The updater itself does not need to be part of the update package if the
+updater is already present in the installed application and is
+responsible for installing the new version.
+
+Before creating a release, update the application version in
+`version.py`.
 
 For example:
 
-```python
+``` python
 VERSION = "1.2.0"
 ```
 
 Then run:
 
-```powershell
+``` powershell
 uv run create_release.py
 ```
 
-The script generates:
+The generated ZIP and `.sha256` files should be uploaded as assets to
+the corresponding GitHub Release.
 
-```text
-mqtt_client_v1.2.0.zip
-mqtt_client_v1.2.0.zip.sha256
+The ZIP and checksum files are excluded from Git using `.gitignore`.
+
+Example `.gitignore` entries:
+
+``` gitignore
+updates/
+*.zip
+*.sha256
+update_completed
 ```
-
-The ZIP contains the files explicitly selected by `create_release.py`.
-
-The update mechanism itself (`updater.py`) is not included in the release ZIP.
-
-The SHA-256 file contains the checksum of the ZIP package:
-
-```text
-<sha256>  mqtt_client_v1.2.0.zip
-```
-
-### Publishing the release on GitHub
-
-After generating the release files:
-
-1. Commit and push the application changes.
-2. Create a Git tag matching the application version, for example:
-   ```text
-   v1.2.0
-   ```
-3. Create a new GitHub Release using the tag.
-4. Upload:
-   ```text
-   mqtt_client_v1.2.0.zip
-   mqtt_client_v1.2.0.zip.sha256
-   ```
-5. Publish the release.
-
-The updater uses the latest GitHub Release and downloads the ZIP and checksum files from its release assets.
 
 ## Checking the stored data
 
 In MySQL Workbench:
 
-```sql
+``` sql
 USE mqtt_project;
 
 SELECT *
@@ -436,56 +490,63 @@ FROM sensor_data
 ORDER BY id DESC;
 ```
 
-You should see the received sensor measurements together with all three timestamps.
+You should see the received sensor measurements together with all three
+timestamps.
 
 ## Timestamp handling
 
 The publisher creates the measurement timestamp:
 
-```python
+``` python
 datetime.now().replace(microsecond=0).isoformat()
 ```
 
-The subscriber records the reception timestamp when the MQTT message is received.
+The subscriber records the reception timestamp when the MQTT message is
+received.
 
-The database creates `stored_timestamp` automatically using a MySQL default value.
+The database creates `stored_timestamp` automatically using a MySQL
+default value.
 
 This makes it possible to distinguish:
 
-1. when the measurement was created,
-2. when the subscriber received it,
-3. when it was stored in the database.
+1.  when the measurement was created,
+2.  when the subscriber received it,
+3.  when it was stored in the database.
 
 ## Security
 
 The project implements several security measures:
 
-- MQTT communication is encrypted using TLS.
-- MQTT clients authenticate with username/password.
-- Anonymous MQTT access is disabled.
-- MQTT and MySQL credentials are stored in `.env`.
-- MySQL uses a dedicated application user instead of `root`.
-- The application database user is granted only the required permissions.
-- Private TLS keys are excluded from Git.
-- The Mosquitto password file is excluded from Git.
-- Downloaded update packages are verified using SHA-256 before installation.
+-   MQTT communication is encrypted using TLS.
+-   MQTT clients authenticate with username/password.
+-   Anonymous MQTT access is disabled.
+-   MQTT and MySQL credentials are stored in `.env`.
+-   MySQL uses a dedicated application user instead of `root`.
+-   The application database user is granted only the required
+    permissions.
+-   Private TLS keys are excluded from Git.
+-   The Mosquitto password file is excluded from Git.
+-   Update packages are verified using SHA-256 before installation.
 
 ## Stopping the application
 
 Stop the publisher or subscriber with:
 
-```text
+``` text
 Ctrl+C
 ```
 
 Stop the Mosquitto broker with:
 
-```text
+``` text
 Ctrl+C
 ```
 
 ## Notes
 
-This project is intended as a local demonstration of an MQTT sensor data pipeline with basic security mechanisms and an automatic application update mechanism.
+This project is intended as a local demonstration of an MQTT sensor data
+pipeline with basic security mechanisms and an automatic application
+update mechanism.
 
-The certificates are self-signed for local development and are not intended for production deployment.
+The certificates are self-signed for local development and are not
+intended for production deployment.
