@@ -18,5 +18,9 @@ passwords.txt
 
 # Update zip and checksum
 updates/
+update_temp/
 *.zip
 *.sha256
+
+# Update marker
+update_completed

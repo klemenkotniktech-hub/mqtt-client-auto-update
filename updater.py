@@ -30,6 +30,9 @@ def install_update(source_dir, target_dir):
         else:
             shutil.copy2(item, destination)
 
+    # Mark successful update
+    (target_dir / "update_completed").touch()
+    
     print(f"Update installed successfully.")
 
 

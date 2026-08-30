@@ -8,8 +8,27 @@ import os
 from dotenv import load_dotenv
 from update import check_for_update
 import sys
+import smtplib
+from email.message import EmailMessage
+from pathlib import Path
+from version import VERSION
 
 load_dotenv()
+
+def send_email(subject, body):
+    message = EmailMessage()
+    message["From"] = os.getenv("EMAIL_SENDER")
+    message["To"] = os.getenv("EMAIL_RECIPIENT")
+    message["Subject"] = subject
+    message.set_content(body)
+
+    with smtplib.SMTP(os.getenv("SMTP_SERVER"), int(os.getenv("SMTP_PORT"))) as server:
+        server.starttls()
+        server.login(
+            os.getenv("EMAIL_SENDER"),
+            os.getenv("EMAIL_PASSWORD")
+        )
+        server.send_message(message)
 
 MQTT_USERNAME = os.getenv("MQTT_USERNAME")
 MQTT_PASSWORD = os.getenv("MQTT_PASSWORD")
@@ -20,6 +39,8 @@ TOPIC = "sensor/environment"
 
 DEVICE_ID = "senzor_01"
 
+UPDATE_MARKER = Path("update_completed")
+
 client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
 client.tls_set(
     ca_certs="certs/ca.crt",
@@ -29,6 +50,19 @@ client.username_pw_set(MQTT_USERNAME, MQTT_PASSWORD)
 
 
 client.connect(BROKER, PORT)
+
+# pošiljanje maila po update-u
+if UPDATE_MARKER.exists():
+    try:
+        send_email(
+            "MQTT client update completed",
+            f"MQTT client version {VERSION} was successfully updated."
+        )
+    except Exception as e:
+        print(f"Failed to send update completion email: {e}")
+
+    UPDATE_MARKER.unlink()
+
 
 
 while True:
@@ -48,6 +82,14 @@ while True:
     # check for update
     update = check_for_update()
     if update:
+        try:
+            send_email(
+                "MQTT client update started",
+                f"Updating MQTT client from version {VERSION} to {update}."
+            )
+        except Exception as e:
+            print(f"Failed to send email: {e}")
+
         print("Update available. Exiting application.")
         sys.exit(0)
 
